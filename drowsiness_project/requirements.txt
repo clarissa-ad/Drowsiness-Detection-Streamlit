@@ -4,3 +4,4 @@ numpy
 mediapipe
 scipy
 playsound==1.2.2
+tensorflow
