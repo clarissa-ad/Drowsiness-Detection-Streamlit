@@ -1,16 +1,18 @@
-# Virtual Environment
+# Python Virtual Environments
 venv/
 env/
-.venv/
 ENV/
-env.bak/
-venv.bak/
+.venv/
+.env/
+virtualenv/
 
-# Python
+# Python Cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Distribution / Packaging
 .Python
 build/
 develop-eggs/
@@ -24,12 +26,9 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
 # PyInstaller
 *.manifest
@@ -38,14 +37,12 @@ MANIFEST
 # Unit test / coverage reports
 htmlcov/
 .tox/
-.nox/
 .coverage
 .coverage.*
 .cache
 nosetests.xml
 coverage.xml
 *.cover
-*.py,cover
 .hypothesis/
 .pytest_cache/
 
@@ -61,7 +58,9 @@ ipython_config.py
 
 # Environments
 .env
-.env.local
+.venv
+env.bak/
+venv.bak/
 
 # IDEs
 .vscode/
@@ -72,23 +71,8 @@ ipython_config.py
 
 # OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
-
-# Logs
 *.log
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Model files (optional - uncomment if models are too large)
-# *.h5
-# *.keras
-# *.pkl
-# *.pth
+# Streamlit
+.streamlit/secrets.toml

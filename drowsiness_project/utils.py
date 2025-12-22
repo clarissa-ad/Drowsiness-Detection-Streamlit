@@ -49,18 +49,44 @@ def get_face_mesh():
     )
     return face_mesh
 
+# --- BOUNDING BOX STABILIZATION ---
+def stabilize_bbox(new_bbox, prev_bbox, alpha=0.7):
+    """
+    Stabilkan bounding box dengan Exponential Moving Average (EMA)
+    untuk mengurangi jitter/flicker pada deteksi real-time
+    
+    Args:
+        new_bbox: Tuple (x, y, w, h) - koordinat bbox terbaru
+        prev_bbox: Tuple (x, y, w, h) - koordinat bbox sebelumnya (None jika pertama kali)
+        alpha: Float (0.0-1.0) - smoothing factor (lebih tinggi = lebih responsif)
+    
+    Returns:
+        Tuple (x, y, w, h) - koordinat bbox yang sudah distabilkan
+    """
+    if prev_bbox is None:
+        return new_bbox
+    
+    # EMA: stabilized = alpha * new + (1-alpha) * prev
+    stabilized = tuple(
+        int(alpha * n + (1 - alpha) * p) 
+        for n, p in zip(new_bbox, prev_bbox)
+    )
+    return stabilized
+
 # --- PREPROCESSING UTAMA ---
-def get_eye_image_for_cnn(frame):
+def get_eye_image_for_cnn(frame, prev_bboxes=None):
     """
     Mendeteksi wajah dan mengekstrak area mata untuk input CNN
+    DENGAN stabilisasi bounding box untuk mengurangi jitter
     
     Args:
         frame: Frame video dari webcam (BGR format)
+        prev_bboxes: List dari bbox sebelumnya [(left_bbox, right_bbox)] atau None
     
     Returns:
-        tuple: (eye_img_processed, bboxes) atau (None, None) jika wajah tidak ditemukan
+        tuple: (eye_img_processed, eye_bboxes) atau (None, None) jika wajah tidak ditemukan
         - eye_img_processed: Array numpy (1, 64, 64, 3) siap untuk prediksi
-        - bboxes: Tuple (left_eye_bbox, right_eye_bbox) untuk kedua mata
+        - eye_bboxes: List berisi dua tuple [(left_x, left_y, left_w, left_h), (right_x, right_y, right_w, right_h)]
     """
     face_mesh = get_face_mesh()
     
@@ -78,78 +104,96 @@ def get_eye_image_for_cnn(frame):
     # Ekstrak koordinat mata kiri dan kanan secara terpisah
     left_eye_points = []
     right_eye_points = []
+    all_eye_points = []
     
     for idx in LEFT_EYE:
         landmark = face_landmarks.landmark[idx]
         x = int(landmark.x * w)
         y = int(landmark.y * h)
         left_eye_points.append((x, y))
+        all_eye_points.append((x, y))
     
     for idx in RIGHT_EYE:
         landmark = face_landmarks.landmark[idx]
         x = int(landmark.x * w)
         y = int(landmark.y * h)
         right_eye_points.append((x, y))
+        all_eye_points.append((x, y))
     
-    # Hitung bounding box untuk mata kiri
+    # Hitung bounding box untuk SETIAP mata (untuk visualisasi)
     left_eye_points = np.array(left_eye_points)
+    right_eye_points = np.array(right_eye_points)
+    
+    padding_individual = 10
+    
+    # Left eye bbox (RAW)
     left_x_min, left_y_min = left_eye_points.min(axis=0)
     left_x_max, left_y_max = left_eye_points.max(axis=0)
+    left_x_min = max(0, left_x_min - padding_individual)
+    left_y_min = max(0, left_y_min - padding_individual)
+    left_x_max = min(w, left_x_max + padding_individual)
+    left_y_max = min(h, left_y_max + padding_individual)
+    left_bbox_raw = (left_x_min, left_y_min, left_x_max - left_x_min, left_y_max - left_y_min)
     
-    # Hitung bounding box untuk mata kanan
-    right_eye_points = np.array(right_eye_points)
+    # Right eye bbox (RAW)
     right_x_min, right_y_min = right_eye_points.min(axis=0)
     right_x_max, right_y_max = right_eye_points.max(axis=0)
+    right_x_min = max(0, right_x_min - padding_individual)
+    right_y_min = max(0, right_y_min - padding_individual)
+    right_x_max = min(w, right_x_max + padding_individual)
+    right_y_max = min(h, right_y_max + padding_individual)
+    right_bbox_raw = (right_x_min, right_y_min, right_x_max - right_x_min, right_y_max - right_y_min)
     
-    # Tambahkan padding lebih besar untuk area mata yang lebih luas
-    padding = 30  # Increased from 20 to 30
+    # STABILISASI BBOX dengan EMA
+    if prev_bboxes is not None and len(prev_bboxes) == 2:
+        left_bbox = stabilize_bbox(left_bbox_raw, prev_bboxes[0], alpha=0.7)
+        right_bbox = stabilize_bbox(right_bbox_raw, prev_bboxes[1], alpha=0.7)
+    else:
+        left_bbox = left_bbox_raw
+        right_bbox = right_bbox_raw
     
-    # Left eye bbox dengan padding
-    left_x_min = max(0, left_x_min - padding)
-    left_y_min = max(0, left_y_min - padding)
-    left_x_max = min(w, left_x_max + padding)
-    left_y_max = min(h, left_y_max + padding)
+    # Hitung bounding box GABUNGAN untuk CNN input
+    all_eye_points = np.array(all_eye_points)
+    x_min, y_min = all_eye_points.min(axis=0)
+    x_max, y_max = all_eye_points.max(axis=0)
     
-    # Right eye bbox dengan padding
-    right_x_min = max(0, right_x_min - padding)
-    right_y_min = max(0, right_y_min - padding)
-    right_x_max = min(w, right_x_max + padding)
-    right_y_max = min(h, right_y_max + padding)
+    # Tambahkan padding untuk combined box
+    padding = 20
+    x_min = max(0, x_min - padding)
+    y_min = max(0, y_min - padding)
+    x_max = min(w, x_max + padding)
+    y_max = min(h, y_max + padding)
     
-    # Crop area kedua mata untuk model (gabungan)
-    all_x_min = min(left_x_min, right_x_min)
-    all_y_min = min(left_y_min, right_y_min)
-    all_x_max = max(left_x_max, right_x_max)
-    all_y_max = max(left_y_max, right_y_max)
-    
-    eye_region = frame[all_y_min:all_y_max, all_x_min:all_x_max]
+    # Crop area mata (TETAP menggunakan combined region untuk CNN)
+    eye_region = frame[y_min:y_max, x_min:x_max]
     
     if eye_region.size == 0:
         return None, None
     
-    # Resize ke ukuran input model
+    # Resize ke ukuran input model (64x64)
     eye_region_resized = cv2.resize(eye_region, IMAGE_SIZE)
     
-    # Normalisasi
+    # NORMALISASI KETAT: Identik dengan training phase
+    # 1. Convert ke float32
+    # 2. Bagi dengan 255.0 untuk range [0.0, 1.0]
     eye_img_processed = eye_region_resized.astype('float32') / 255.0
     
-    # Tambahkan dimensi batch
+    # Tambahkan dimensi batch: (1, 64, 64, 3)
     eye_img_processed = np.expand_dims(eye_img_processed, axis=0)
     
-    # Return bounding boxes untuk kedua mata
-    left_eye_bbox = (left_x_min, left_y_min, left_x_max - left_x_min, left_y_max - left_y_min)
-    right_eye_bbox = (right_x_min, right_y_min, right_x_max - right_x_min, right_y_max - right_y_min)
+    # Return processed image dan DUA bounding boxes terpisah (STABILIZED)
+    eye_bboxes = [left_bbox, right_bbox]
     
-    return eye_img_processed, (left_eye_bbox, right_eye_bbox)
+    return eye_img_processed, eye_bboxes
 
 # --- VISUALIZATION HELPER ---
-def draw_eye_boxes(frame, bboxes, color=(0, 255, 0), thickness=2):
+def draw_eye_box(frame, bboxes, color=(0, 255, 0), thickness=2):
     """
-    Menggambar kotak pembatas di sekitar area mata kiri dan kanan
+    Menggambar kotak pembatas di sekitar area mata
     
     Args:
         frame: Frame video
-        bboxes: Tuple (left_eye_bbox, right_eye_bbox) atau None
+        bboxes: List of tuples [(x, y, w, h), ...] atau single tuple (x, y, w, h)
         color: Warna kotak (BGR format)
         thickness: Ketebalan garis
     
@@ -159,16 +203,15 @@ def draw_eye_boxes(frame, bboxes, color=(0, 255, 0), thickness=2):
     if bboxes is None:
         return frame
     
-    left_eye_bbox, right_eye_bbox = bboxes
-    
-    # Draw left eye box
-    if left_eye_bbox is not None:
-        x, y, w, h = left_eye_bbox
-        cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
-    
-    # Draw right eye box
-    if right_eye_bbox is not None:
-        x, y, w, h = right_eye_bbox
+    # Handle both single bbox and list of bboxes
+    if isinstance(bboxes, list):
+        for bbox in bboxes:
+            if bbox is not None:
+                x, y, w, h = bbox
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
+    else:
+        # Single bbox (backward compatibility)
+        x, y, w, h = bboxes
         cv2.rectangle(frame, (x, y), (x + w, y + h), color, thickness)
     
     return frame

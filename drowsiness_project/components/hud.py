@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def draw_hud(frame, probability):
+def draw_hud(frame, probability, alarm_active=False):
     """
     Draws the 'Iron Man' style HUD on the video frame.
     
@@ -10,6 +10,7 @@ def draw_hud(frame, probability):
         probability: Float (0.0 to 1.0). 
                      1.0 means VERY DROWSY (Eyes Closed).
                      0.0 means AWAKE (Eyes Open).
+        alarm_active: Boolean - True jika alarm consecutive frames telah aktif
     
     Returns:
         The annotated frame.
@@ -17,7 +18,7 @@ def draw_hud(frame, probability):
     height, width, _ = frame.shape
     
     # --- CONFIGURATION ---
-    # Threshold: If probability > 0.8, we trigger the alarm visuals
+    # Threshold: If probability > 0.5, we trigger the alarm visuals
     IS_DROWSY = probability > 0.5 
     
     # Colors (BGR format for OpenCV)
@@ -64,11 +65,27 @@ def draw_hud(frame, probability):
     cv2.putText(frame, "DROWSINESS", (width - 130, 40), 
                 cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
     
-    # --- 4. TARGET RETICLE (Iron Man Style) ---
-    # Draws a small target in the center of the screen
-    center_x, center_y = width // 2, height // 2
-    cv2.circle(frame, (center_x, center_y), 20, (255, 255, 255), 1)
-    cv2.line(frame, (center_x - 30, center_y), (center_x + 30, center_y), (255, 255, 255), 1)
-    cv2.line(frame, (center_x, center_y - 30), (center_x, center_y + 30), (255, 255, 255), 1)
+    # --- 4. ALARM VISUAL (CENTER SCREEN) ---
+    # Hanya muncul jika alarm_active = True (setelah consecutive frames)
+    if alarm_active:
+        # Posisi tengah layar
+        center_x, center_y = width // 2, height // 2
+        
+        # Background semi-transparan untuk teks
+        overlay = frame.copy()
+        cv2.rectangle(overlay, 
+                     (center_x - 250, center_y - 80), 
+                     (center_x + 250, center_y + 80), 
+                     (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        
+        # Teks peringatan besar di tengah
+        cv2.putText(frame, "!!! WAKE UP !!!", 
+                   (center_x - 220, center_y - 10), 
+                   cv2.FONT_HERSHEY_DUPLEX, 2.0, (0, 0, 255), 5)
+        
+        cv2.putText(frame, "DROWSINESS DETECTED", 
+                   (center_x - 200, center_y + 50), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
 
     return frame

@@ -4,7 +4,7 @@ import tempfile
 import time
 import os
 from components import hud
-from utils import process_frame
+from utils import load_cnn_model, get_eye_image_for_cnn, draw_eye_box
 
 def run_video_file():
     """
@@ -43,13 +43,26 @@ def run_video_file():
             if stop_button:
                 break
 
-            # --- A. LOGIC (Member 1's Math) ---
-            # We call the shared utils function to get the EAR score
-            ear_score = process_frame(frame)
+            # --- A. MODEL INFERENCE (CNN-based detection) ---
+            # Load model (cached)
+            model = load_cnn_model()
+            if model is None:
+                st.error("Model failed to load")
+                break
+                
+            # Extract eye regions and predict drowsiness
+            eye_img_processed, eye_bboxes = get_eye_image_for_cnn(frame)
+            drowsiness_prob = 0.0
             
-            # Simple Logic: If EAR < 0.21, eyes are closed (Drowsy)
-            # We convert this to a probability for the HUD (1.0 = Asleep, 0.0 = Awake)
-            drowsiness_prob = 1.0 if ear_score < 0.21 else 0.0
+            if eye_img_processed is not None:
+                prediction = model.predict(eye_img_processed, verbose=0)
+                raw_prediction = float(prediction[0][0])
+                # Invert: model predicts awake, we need drowsiness
+                drowsiness_prob = 1.0 - raw_prediction
+                
+                # Draw bounding boxes on the frame
+                color = (0, 0, 255) if drowsiness_prob >= 0.5 else (0, 255, 0)
+                frame = draw_eye_box(frame, eye_bboxes, color=color, thickness=2)
 
             # --- B. VISUALS (Member 2's Design) ---
             # We pass the frame to the HUD designer to draw the futuristic overlay
@@ -59,11 +72,14 @@ def run_video_file():
             # Convert BGR (OpenCV standard) to RGB (Streamlit standard)
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
+            # Mirror the frame horizontally (same as live camera)
+            frame_rgb = cv2.flip(frame_rgb, 1)
+            
             # Update the image placeholder
             st_frame.image(frame_rgb, channels="RGB", use_container_width=True)
             
-            # Optional: Show the raw EAR score below
-            st_metrics.metric("Eye Aspect Ratio (EAR)", f"{ear_score:.2f}")
+            # Show the drowsiness score
+            st_metrics.metric("Drowsiness Score", f"{drowsiness_prob:.2f}")
 
             # Slow down slightly to match normal video speed (approx 30 FPS)
             time.sleep(0.03)
